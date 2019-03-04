@@ -1,0 +1,10 @@
+[package]
+name = "apt-cli-wrappers"
+version = "0.1.0"
+authors = ["Michael Aaron Murphy <mmstickman@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+[dependencies]
+exit-status-ext = { git = "https://github.com/pop-os/exit-status-ext" }
+libc = "0.2.49"
