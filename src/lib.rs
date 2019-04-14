@@ -108,3 +108,11 @@ pub fn dpkg_configure_all() -> io::Result<()> {
     // TODO: progress callback support.
     Command::new("dpkg").args(&["--configure", "-a"]).status().and_then(ExitStatusExt::as_result)
 }
+
+pub fn apt_hold(package: &str) -> io::Result<()> {
+    Command::new("apt-mark").args(&["hold", package]).status().and_then(ExitStatusExt::as_result)
+}
+
+pub fn apt_unhold(package: &str) -> io::Result<()> {
+    Command::new("apt-mark").args(&["unhold", package]).status().and_then(ExitStatusExt::as_result)
+}
