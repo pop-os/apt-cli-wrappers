@@ -103,6 +103,11 @@ pub fn apt_install(packages: &[&str]) -> io::Result<()> {
     apt_noninteractive(move |cmd| cmd.arg("install").args(packages))
 }
 
+/// apt-get -y --allow-downgrades purge
+pub fn apt_purge(packages: &[&str]) -> io::Result<()> {
+    apt_noninteractive(move |cmd| cmd.arg("purge").args(packages))
+}
+
 /// dpkg --configure -a
 pub fn dpkg_configure_all() -> io::Result<()> {
     // TODO: progress callback support.
