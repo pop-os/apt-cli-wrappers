@@ -45,7 +45,10 @@ fn non_blocking_line_reading<B: BufRead, F: Fn(&str)>(
                 buffer.clear();
             }
             Err(ref why) if why.kind() == io::ErrorKind::WouldBlock => break,
-            Err(why) => return Err(why),
+            Err(why) => {
+                buffer.clear();
+                return Err(why);
+            },
         }
     }
 
@@ -74,7 +77,7 @@ pub fn apt_noninteractive_callback<F: FnMut(&mut Command) -> &mut Command, C: Fn
             Some(status) => return status.as_result(),
             None => {
                 if let Some(ref mut stdout) = stdout {
-                    non_blocking_line_reading(stdout, &mut stdout_buffer, &callback)?;
+                    let _ = non_blocking_line_reading(stdout, &mut stdout_buffer, &callback);
                 }
             }
         }
