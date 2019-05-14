@@ -59,6 +59,10 @@ pub fn apt_install(packages: &[&str]) -> io::Result<()> {
     apt_noninteractive(move |cmd| cmd.arg("install").args(packages))
 }
 
+pub fn apt_install_fix_broken() -> io::Result<()> {
+    apt_noninteractive(move |cmd| cmd.args(&["install", "-f"]))
+}
+
 /// apt-get -y --allow-downgrades purge
 pub fn apt_purge(packages: &[&str]) -> io::Result<()> {
     apt_noninteractive(move |cmd| cmd.arg("purge").args(packages))
@@ -85,9 +89,6 @@ pub fn apt_upgrade<C: Fn(AptUpgradeEvent)>(callback: C) -> io::Result<()> {
         },
     )
 }
-
-
-
 
 
 /// dpkg --configure -a
