@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use std::str::FromStr;
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AptUpgradeEvent {
-    Processing { package: String },
+    Processing { package: Box<str> },
     Progress { percent: u8 },
-    SettingUp { package: String },
-    Unpacking { package: String, version: String, over: String },
+    SettingUp { package: Box<str> },
+    Unpacking { package: Box<str>, version: Box<str>, over: Box<str> },
 }
 
 impl AptUpgradeEvent {
@@ -16,42 +15,62 @@ impl AptUpgradeEvent {
 
         match self {
             AptUpgradeEvent::Processing { package } => {
-                map.insert("processing_package", package);
+                map.insert("processing_package", package.into());
             }
             AptUpgradeEvent::Progress { percent } => {
                 map.insert("percent", percent.to_string());
             }
             AptUpgradeEvent::SettingUp { package } => {
-                map.insert("setting_up", package);
+                map.insert("setting_up", package.into());
             }
             AptUpgradeEvent::Unpacking { package, version, over } => {
-                map.insert("unpacking", package);
-                map.insert("version", version);
-                map.insert("over", over);
+                map.insert("unpacking", package.into());
+                map.insert("version", version.into());
+                map.insert("over", over.into());
             }
         }
 
         map
     }
 
-    pub fn from_dbus_map(mut map: HashMap<&str, String>) -> Result<Self, ()> {
-        if let Some(package) = map.remove(&"processing_package") {
-            Ok(AptUpgradeEvent::Processing { package })
-        } else if let Some(percent) = map.remove(&"percent") {
-            let percent = percent.parse::<u8>().map_err(|_| ())?;
-            Ok(AptUpgradeEvent::Progress { percent })
-        } else if let Some(package) = map.remove(&"setting_up") {
-            Ok(AptUpgradeEvent::SettingUp { package })
-        } else if let Some(over) = map.remove(&"over") {
-            match (map.remove(&"version"), map.remove(&"unpacking")) {
-                (Some(version), Some(package)) => {
-                    Ok(AptUpgradeEvent::Unpacking { package, version, over })
-                }
-                _ => Err(()),
+    pub fn from_dbus_map<K: AsRef<str>, V: AsRef<str> + Into<Box<str>>>(
+        mut map: impl Iterator<Item = (K, V)>,
+    ) -> Result<Self, ()> {
+        use self::AptUpgradeEvent::*;
+
+        let (key, value) = match map.next() {
+            Some(value) => value,
+            None => return Err(()),
+        };
+
+        let event = match key.as_ref() {
+            "processing_package" => Processing { package: value.into() },
+            "percent" => {
+                let percent = value.as_ref().parse::<u8>().map_err(|_| ())?;
+                Progress { percent }
             }
-        } else {
-            Err(())
-        }
+            "setting_up" => SettingUp { package: value.into() },
+            "over" => match (map.next(), map.next()) {
+                (Some((key1, value1)), Some((key2, value2))) => {
+                    let over = value.into();
+                    let value1 = value1.into();
+                    let value2 = value2.into();
+                    match (key1.as_ref(), key2.as_ref()) {
+                        ("version", "unpacking") => {
+                            Unpacking { package: value2, version: value1, over }
+                        }
+                        ("unpacking", "version") => {
+                            Unpacking { package: value1, version: value2, over }
+                        }
+                        _ => return Err(()),
+                    }
+                }
+                _ => return Err(()),
+            },
+            _ => return Err(()),
+        };
+
+        Ok(event)
     }
 }
 
@@ -86,12 +105,12 @@ impl FromStr for AptUpgradeEvent {
         } else if input.starts_with("Processing triggers for ") {
             let (_, input) = input.split_at(24);
             if let Some(package) = input.split_whitespace().next() {
-                return Ok(AptUpgradeEvent::Processing { package: package.to_owned() });
+                return Ok(AptUpgradeEvent::Processing { package: package.into() });
             }
         } else if input.starts_with("Setting up ") {
             let (_, input) = input.split_at(11);
             if let Some(package) = input.split_whitespace().next() {
-                return Ok(AptUpgradeEvent::SettingUp { package: package.to_owned() });
+                return Ok(AptUpgradeEvent::SettingUp { package: package.into() });
             }
         } else if input.starts_with("Unpacking ") {
             let (_, input) = input.split_at(10);
@@ -101,9 +120,9 @@ impl FromStr for AptUpgradeEvent {
             {
                 if version.len() > 2 && over.len() > 2 {
                     return Ok(AptUpgradeEvent::Unpacking {
-                        package: package.to_owned(),
-                        version: version[1..version.len() - 1].to_owned(),
-                        over: over[1..over.len() - 1].to_owned(),
+                        package: package.into(),
+                        version: version[1..version.len() - 1].into(),
+                        over: over[1..over.len() - 1].into(),
                     });
                 }
             }
