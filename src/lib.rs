@@ -90,7 +90,6 @@ pub fn apt_upgrade<C: Fn(AptUpgradeEvent)>(callback: C) -> io::Result<()> {
     )
 }
 
-
 /// dpkg --configure -a
 pub fn dpkg_configure_all() -> io::Result<()> {
     // TODO: progress callback support.
@@ -130,7 +129,7 @@ fn non_blocking_line_reading<B: BufRead, F: Fn(&str)>(
             Err(why) => {
                 buffer.clear();
                 return Err(why);
-            },
+            }
         }
     }
 

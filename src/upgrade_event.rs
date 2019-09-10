@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use std::str::FromStr;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AptUpgradeEvent {
     Processing { package: Box<str> },
@@ -50,28 +51,48 @@ impl AptUpgradeEvent {
                 Progress { percent }
             }
             "setting_up" => SettingUp { package: value.into() },
-            "over" => match (map.next(), map.next()) {
+            key => match (map.next(), map.next()) {
                 (Some((key1, value1)), Some((key2, value2))) => {
-                    let over = value.into();
-                    let value1 = value1.into();
-                    let value2 = value2.into();
-                    match (key1.as_ref(), key2.as_ref()) {
-                        ("version", "unpacking") => {
-                            Unpacking { package: value2, version: value1, over }
-                        }
-                        ("unpacking", "version") => {
-                            Unpacking { package: value1, version: value2, over }
+                    let over = &mut None;
+                    let version = &mut None;
+                    let package = &mut None;
+
+                    match_field(over, version, package, key, value.into())?;
+                    match_field(over, version, package, key1.as_ref(), value1.into())?;
+                    match_field(over, version, package, key2.as_ref(), value2.into())?;
+
+                    match (over.take(), version.take(), package.take()) {
+                        (Some(over), Some(version), Some(package)) => {
+                            Unpacking { package, version, over }
                         }
                         _ => return Err(()),
                     }
                 }
                 _ => return Err(()),
             },
-            _ => return Err(()),
         };
 
         Ok(event)
     }
+}
+
+fn match_field<'a>(
+    over: &'a mut Option<Box<str>>,
+    version: &'a mut Option<Box<str>>,
+    package: &'a mut Option<Box<str>>,
+    key: &str,
+    value: Box<str>,
+) -> Result<(), ()> {
+    let field = match key {
+        "over" => over,
+        "version" => version,
+        "unpacking" => package,
+        _ => return Err(()),
+    };
+
+    *field = Some(value);
+
+    Ok(())
 }
 
 impl Display for AptUpgradeEvent {
