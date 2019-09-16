@@ -2,11 +2,16 @@ mod upgrade_event;
 
 pub use self::upgrade_event::AptUpgradeEvent;
 use exit_status_ext::ExitStatusExt;
-use std::fs::File;
-use std::io::{self, BufRead, BufReader};
-use std::os::unix::io::{FromRawFd, IntoRawFd};
-use std::process::{Command, Stdio};
-use std::{thread, time::Duration};
+
+use std::{
+    fs::File,
+    io::{self, BufRead, BufReader},
+    os::unix::io::{FromRawFd, IntoRawFd},
+    path::Path,
+    process::{Command, Stdio},
+    thread,
+    time::Duration,
+};
 
 /// Execute the apt command non-interactively, using whichever additional arguments are provided.
 pub fn apt_noninteractive<F: FnMut(&mut Command) -> &mut Command>(mut func: F) -> io::Result<()> {
@@ -51,49 +56,55 @@ pub fn apt_noninteractive_callback<F: FnMut(&mut Command) -> &mut Command, C: Fn
 
 // apt-autoremove -y
 pub fn apt_autoremove() -> io::Result<()> {
-    apt_noninteractive(|cmd| cmd.arg("autoremove"))
+    wait_for_apt_locks(3000, || apt_noninteractive(|cmd| cmd.arg("autoremove")))
 }
 
 /// apt-get -y --allow-downgrades install
 pub fn apt_install(packages: &[&str]) -> io::Result<()> {
-    apt_noninteractive(move |cmd| cmd.arg("install").args(packages))
+    wait_for_apt_locks(3000, || apt_noninteractive(move |cmd| cmd.arg("install").args(packages)))
 }
 
 pub fn apt_install_fix_broken() -> io::Result<()> {
-    apt_noninteractive(move |cmd| cmd.args(&["install", "-f"]))
+    wait_for_apt_locks(3000, || apt_noninteractive(move |cmd| cmd.args(&["install", "-f"])))
 }
 
 /// apt-get -y --allow-downgrades purge
 pub fn apt_purge(packages: &[&str]) -> io::Result<()> {
-    apt_noninteractive(move |cmd| cmd.arg("purge").args(packages))
+    wait_for_apt_locks(3000, || apt_noninteractive(move |cmd| cmd.arg("purge").args(packages)))
 }
 
 /// apt-get -y --allow-downgrades install --reinstall
 pub fn apt_reinstall(packages: &[&str]) -> io::Result<()> {
-    apt_noninteractive(move |cmd| cmd.arg("install").arg("--reinstall").args(packages))
+    wait_for_apt_locks(3000, || {
+        apt_noninteractive(move |cmd| cmd.arg("install").arg("--reinstall").args(packages))
+    })
 }
 
 /// apt-get -y --allow-downgrades full-upgrade
 pub fn apt_update() -> io::Result<()> {
-    apt_noninteractive(|cmd| cmd.arg("update"))
+    wait_for_apt_locks(3000, || apt_noninteractive(|cmd| cmd.arg("update")))
 }
 
 /// apt-get -y --allow-downgrades full-upgrade
 pub fn apt_upgrade<C: Fn(AptUpgradeEvent)>(callback: C) -> io::Result<()> {
-    apt_noninteractive_callback(
-        |cmd| cmd.args(&["--show-progress", "full-upgrade"]),
-        move |line| {
-            if let Ok(event) = line.parse::<AptUpgradeEvent>() {
-                callback(event);
-            }
-        },
-    )
+    wait_for_apt_locks(3000, || {
+        apt_noninteractive_callback(
+            |cmd| cmd.args(&["--show-progress", "full-upgrade"]),
+            move |line| {
+                if let Ok(event) = line.parse::<AptUpgradeEvent>() {
+                    callback(event);
+                }
+            },
+        )
+    })
 }
 
 /// dpkg --configure -a
 pub fn dpkg_configure_all() -> io::Result<()> {
     // TODO: progress callback support.
-    Command::new("dpkg").args(&["--configure", "-a"]).status().and_then(ExitStatusExt::as_result)
+    wait_for_apt_locks(3000, || {
+        Command::new("dpkg").args(&["--configure", "-a"]).status().and_then(ExitStatusExt::as_result)
+    })
 }
 
 pub fn apt_hold(package: &str) -> io::Result<()> {
@@ -134,4 +145,33 @@ fn non_blocking_line_reading<B: BufRead, F: Fn(&str)>(
     }
 
     Ok(())
+}
+
+const LISTS_LOCK: &str = "/var/lib/apt/lists/lock";
+const DPKG_LOCK: &str = "/var/lib/dpkg/lock";
+
+pub fn wait_for_apt_locks<R, F: FnOnce() -> R>(delay: u64, func: F) -> R {
+    let paths = &[Path::new(DPKG_LOCK), Path::new(LISTS_LOCK)];
+
+    while lock_found(paths) {
+        thread::sleep(Duration::from_millis(delay));
+    }
+
+    func()
+}
+
+fn lock_found(paths: &[&Path]) -> bool {
+    for proc in procfs::all_processes() {
+        if let Ok(fdinfos) = proc.fd() {
+            for fdinfo in fdinfos {
+                if let procfs::FDTarget::Path(path) = fdinfo.target {
+                    if paths.into_iter().any(|&p| &*path == p) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    false
 }
