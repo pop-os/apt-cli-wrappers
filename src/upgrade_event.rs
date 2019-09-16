@@ -117,9 +117,9 @@ impl FromStr for AptUpgradeEvent {
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         if input.starts_with("Progress: [") {
             let (_, progress) = input.split_at(11);
-            let progress = progress.trim_right();
+            let progress = progress.trim_end();
             if progress.len() == 5 {
-                if let Ok(percent) = progress[..progress.len() - 2].trim_left().parse::<u8>() {
+                if let Ok(percent) = progress[..progress.len() - 2].trim_start().parse::<u8>() {
                     return Ok(AptUpgradeEvent::Progress { percent });
                 }
             }
