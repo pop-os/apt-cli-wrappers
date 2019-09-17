@@ -8,6 +8,7 @@ pub enum AptUpgradeEvent {
     Progress { percent: u8 },
     SettingUp { package: Box<str> },
     Unpacking { package: Box<str>, version: Box<str>, over: Box<str> },
+    WaitingOnLock,
 }
 
 impl AptUpgradeEvent {
@@ -29,6 +30,9 @@ impl AptUpgradeEvent {
                 map.insert("version", version.into());
                 map.insert("over", over.into());
             }
+            AptUpgradeEvent::WaitingOnLock => {
+                map.insert("waiting", "".into());
+            }
         }
 
         map
@@ -45,6 +49,7 @@ impl AptUpgradeEvent {
         };
 
         let event = match key.as_ref() {
+            "waiting" => WaitingOnLock,
             "processing_package" => Processing { package: value.into() },
             "percent" => {
                 let percent = value.as_ref().parse::<u8>().map_err(|_| ())?;
@@ -106,6 +111,9 @@ impl Display for AptUpgradeEvent {
             AptUpgradeEvent::Unpacking { package, version, over } => {
                 write!(fmt, "unpacking {} ({}) over ({})", package, version, over)
             }
+            AptUpgradeEvent::WaitingOnLock => {
+                write!(fmt, "waiting on a process holding the apt lock files")
+            }
         }
     }
 }
@@ -117,9 +125,9 @@ impl FromStr for AptUpgradeEvent {
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         if input.starts_with("Progress: [") {
             let (_, progress) = input.split_at(11);
-            let progress = progress.trim_end();
+            let progress = progress.trim_right();
             if progress.len() == 5 {
-                if let Ok(percent) = progress[..progress.len() - 2].trim_start().parse::<u8>() {
+                if let Ok(percent) = progress[..progress.len() - 2].trim_left().parse::<u8>() {
                     return Ok(AptUpgradeEvent::Progress { percent });
                 }
             }
