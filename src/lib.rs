@@ -92,7 +92,9 @@ pub fn apt_update<L: FnMut()>(on_lock: L) -> io::Result<()> {
 }
 
 /// apt-get -y --allow-downgrades full-upgrade
-pub fn apt_upgrade<C: Fn(AptUpgradeEvent), L: FnMut()>(callback: C, on_lock: L) -> io::Result<()> {
+pub fn apt_upgrade<C: Fn(AptUpgradeEvent)>(callback: C) -> io::Result<()> {
+    let callback = &callback;
+    let on_lock = || callback(AptUpgradeEvent::WaitingOnLock);
     wait_for_apt_locks(3000, on_lock, || {
         apt_noninteractive_callback(
             |cmd| cmd.args(&["--show-progress", "full-upgrade"]),
