@@ -55,47 +55,51 @@ pub fn apt_noninteractive_callback<F: FnMut(&mut Command) -> &mut Command, C: Fn
 }
 
 // apt-autoremove -y
-pub fn apt_autoremove<L: FnMut()>(on_lock: L) -> io::Result<()> {
-    wait_for_apt_locks(3000, on_lock, || apt_noninteractive(|cmd| cmd.arg("autoremove")))
+pub fn apt_autoremove<L: FnMut(bool)>(readiness: L) -> io::Result<()> {
+    wait_for_apt_locks(3000, readiness, || apt_noninteractive(|cmd| cmd.arg("autoremove")))
 }
 
 /// apt-get -y --allow-downgrades install
-pub fn apt_install<L: FnMut()>(packages: &[&str], on_lock: L) -> io::Result<()> {
-    wait_for_apt_locks(3000, on_lock, || {
+pub fn apt_install<L: FnMut(bool)>(packages: &[&str], readiness: L) -> io::Result<()> {
+    wait_for_apt_locks(3000, readiness, || {
         apt_noninteractive(move |cmd| cmd.arg("install").args(packages))
     })
 }
 
-pub fn apt_install_fix_broken<L: FnMut()>(on_lock: L) -> io::Result<()> {
-    wait_for_apt_locks(3000, on_lock, || {
+pub fn apt_install_fix_broken<L: FnMut(bool)>(readiness: L) -> io::Result<()> {
+    wait_for_apt_locks(3000, readiness, || {
         apt_noninteractive(move |cmd| cmd.args(&["install", "-f"]))
     })
 }
 
 /// apt-get -y --allow-downgrades purge
-pub fn apt_purge<L: FnMut()>(packages: &[&str], on_lock: L) -> io::Result<()> {
-    wait_for_apt_locks(3000, on_lock, || {
+pub fn apt_purge<L: FnMut(bool)>(packages: &[&str], readiness: L) -> io::Result<()> {
+    wait_for_apt_locks(3000, readiness, || {
         apt_noninteractive(move |cmd| cmd.arg("purge").args(packages))
     })
 }
 
 /// apt-get -y --allow-downgrades install --reinstall
-pub fn apt_reinstall<L: FnMut()>(packages: &[&str], on_lock: L) -> io::Result<()> {
-    wait_for_apt_locks(3000, on_lock, || {
+pub fn apt_reinstall<L: FnMut(bool)>(packages: &[&str], readiness: L) -> io::Result<()> {
+    wait_for_apt_locks(3000, readiness, || {
         apt_noninteractive(move |cmd| cmd.arg("install").arg("--reinstall").args(packages))
     })
 }
 
 /// apt-get -y --allow-downgrades full-upgrade
-pub fn apt_update<L: FnMut()>(on_lock: L) -> io::Result<()> {
-    wait_for_apt_locks(3000, on_lock, || apt_noninteractive(|cmd| cmd.arg("update")))
+pub fn apt_update<L: FnMut(bool)>(readiness: L) -> io::Result<()> {
+    wait_for_apt_locks(3000, readiness, || apt_noninteractive(|cmd| cmd.arg("update")))
 }
 
 /// apt-get -y --allow-downgrades full-upgrade
 pub fn apt_upgrade<C: Fn(AptUpgradeEvent)>(callback: C) -> io::Result<()> {
     let callback = &callback;
-    let on_lock = || callback(AptUpgradeEvent::WaitingOnLock);
-    wait_for_apt_locks(3000, on_lock, || {
+    let readiness = |ready: bool| {
+        if !ready {
+            callback(AptUpgradeEvent::WaitingOnLock)
+        }
+    };
+    wait_for_apt_locks(3000, readiness, || {
         apt_noninteractive_callback(
             |cmd| cmd.args(&["--show-progress", "full-upgrade"]),
             move |line| {
@@ -108,9 +112,9 @@ pub fn apt_upgrade<C: Fn(AptUpgradeEvent)>(callback: C) -> io::Result<()> {
 }
 
 /// dpkg --configure -a
-pub fn dpkg_configure_all<L: FnMut()>(on_lock: L) -> io::Result<()> {
+pub fn dpkg_configure_all<L: FnMut(bool)>(readiness: L) -> io::Result<()> {
     // TODO: progress callback support.
-    wait_for_apt_locks(3000, on_lock, || {
+    wait_for_apt_locks(3000, readiness, || {
         Command::new("dpkg")
             .args(&["--configure", "-a"])
             .status()
@@ -161,9 +165,9 @@ fn non_blocking_line_reading<B: BufRead, F: Fn(&str)>(
 const LISTS_LOCK: &str = "/var/lib/apt/lists/lock";
 const DPKG_LOCK: &str = "/var/lib/dpkg/lock";
 
-pub fn wait_for_apt_locks<R, L: FnMut(), F: FnOnce() -> R>(
+pub fn wait_for_apt_locks<R, L: FnMut(bool), F: FnOnce() -> R>(
     delay: u64,
-    mut on_lock: L,
+    mut readiness: L,
     func: F,
 ) -> R {
     let paths = &[Path::new(DPKG_LOCK), Path::new(LISTS_LOCK)];
@@ -171,13 +175,14 @@ pub fn wait_for_apt_locks<R, L: FnMut(), F: FnOnce() -> R>(
     let waiting = lock_found(paths);
 
     if waiting {
-        on_lock();
+        readiness(false);
         thread::sleep(Duration::from_millis(delay));
         while lock_found(paths) {
             thread::sleep(Duration::from_millis(delay));
         }
     }
 
+    readiness(true);
     func()
 }
 
