@@ -86,6 +86,13 @@ pub fn apt_reinstall<L: FnMut(bool)>(packages: &[&str], readiness: L) -> io::Res
     })
 }
 
+/// apt-get remove --autoremove -y
+pub fn apt_remove<L: FnMut(bool)>(packages: &[&str], readiness: L) -> io::Result<()> {
+    wait_for_apt_locks(3000, readiness, || {
+        apt_noninteractive(move |cmd| cmd.arg("remove").arg("--autoremove").args(packages))
+    })
+}
+
 /// apt-get -y --allow-downgrades full-upgrade
 pub fn apt_update<L: FnMut(bool)>(readiness: L) -> io::Result<()> {
     wait_for_apt_locks(3000, readiness, || apt_noninteractive(|cmd| cmd.arg("update")))
