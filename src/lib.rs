@@ -15,7 +15,7 @@ use std::{
 };
 
 /// Execute the apt command non-interactively, using whichever additional arguments are provided.
-pub fn apt_noninteractive<F: FnMut(&mut Command) -> &mut Command>(mut func: F) -> io::Result<()> {
+pub fn apt_noninteractive<F: FnOnce(&mut Command) -> &mut Command>(func: F) -> io::Result<()> {
     func(
         Command::new("apt-get")
             .env("DEBIAN_FRONTEND", "noninteractive")
@@ -88,9 +88,12 @@ pub fn apt_reinstall<L: FnMut(bool)>(packages: &[&str], readiness: L) -> io::Res
 }
 
 /// apt-get remove --autoremove -y
-pub fn apt_remove<L: FnMut(bool)>(packages: &[&str], readiness: L) -> io::Result<()> {
+pub fn apt_remove<I: IntoIterator<Item = S>, S: AsRef<OsStr>, L: FnMut(bool)>(
+    packages: I,
+    readiness: L,
+) -> io::Result<()> {
     wait_for_apt_locks(3000, readiness, || {
-        apt_noninteractive(move |cmd| cmd.arg("remove").arg("--autoremove").args(packages))
+        apt_noninteractive(|cmd| cmd.arg("remove").arg("--autoremove").args(packages))
     })
 }
 
