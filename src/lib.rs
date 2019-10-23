@@ -4,6 +4,7 @@ pub use self::upgrade_event::AptUpgradeEvent;
 use exit_status_ext::ExitStatusExt;
 
 use std::{
+    ffi::OsStr,
     fs::File,
     io::{self, BufRead, BufReader},
     os::unix::io::{FromRawFd, IntoRawFd},
@@ -135,6 +136,34 @@ pub fn apt_hold(package: &str) -> io::Result<()> {
 
 pub fn apt_unhold(package: &str) -> io::Result<()> {
     Command::new("apt-mark").args(&["unhold", package]).status().and_then(ExitStatusExt::as_result)
+}
+
+pub fn installed<'a, I, S>(
+    buffer: &'a mut String,
+    packages: I,
+) -> impl Iterator<Item = &'a str> + 'a
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    *buffer = Command::new("dpkg-query")
+        .args(&["--show", "--showformat=${Package} ${db:Status-Status}\n"])
+        .args(packages)
+        .stdout(Stdio::piped())
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .unwrap_or_default();
+
+    buffer.lines().filter_map(|line| {
+        let mut fields = line.split(' ');
+        let package = fields.next().unwrap();
+        if fields.next().unwrap() == "installed" {
+            Some(package)
+        } else {
+            None
+        }
+    })
 }
 
 fn non_blocking<F: IntoRawFd>(fd: F) -> File {
