@@ -1,6 +1,15 @@
+mod apt_lock;
+mod misc;
+mod predepends;
 mod upgrade_event;
 
-pub use self::upgrade_event::AptUpgradeEvent;
+pub use self::{
+    apt_lock::wait_for_apt_locks,
+    predepends::{predepends_of, PreDependsIter},
+    upgrade_event::AptUpgradeEvent,
+};
+
+use self::misc::check_output;
 use exit_status_ext::ExitStatusExt;
 
 use std::{
@@ -8,7 +17,6 @@ use std::{
     fs::File,
     io::{self, BufRead, BufReader},
     os::unix::io::{FromRawFd, IntoRawFd},
-    path::Path,
     process::{Command, Stdio},
     thread,
     time::Duration,
@@ -58,6 +66,16 @@ pub fn apt_noninteractive_callback<F: FnMut(&mut Command) -> &mut Command, C: Fn
 // apt-autoremove -y
 pub fn apt_autoremove<L: FnMut(bool)>(readiness: L) -> io::Result<()> {
     wait_for_apt_locks(3000, readiness, || apt_noninteractive(|cmd| cmd.arg("autoremove")))
+}
+
+/// apt-cache subcommand package...
+pub fn apt_cache<L: FnMut(bool)>(
+    subcommand: &str,
+    packages: &[&str],
+    readiness: L,
+) -> io::Result<String> {
+    let command = || check_output("apt-cache", |cmd| cmd.arg(subcommand).args(packages));
+    wait_for_apt_locks(3000, readiness, command)
 }
 
 /// apt-get -y --allow-downgrades install
@@ -199,44 +217,4 @@ fn non_blocking_line_reading<B: BufRead, F: Fn(&str)>(
     }
 
     Ok(())
-}
-
-const LISTS_LOCK: &str = "/var/lib/apt/lists/lock";
-const DPKG_LOCK: &str = "/var/lib/dpkg/lock";
-
-pub fn wait_for_apt_locks<R, L: FnMut(bool), F: FnOnce() -> R>(
-    delay: u64,
-    mut readiness: L,
-    func: F,
-) -> R {
-    let paths = &[Path::new(DPKG_LOCK), Path::new(LISTS_LOCK)];
-
-    let waiting = lock_found(paths);
-
-    if waiting {
-        readiness(false);
-        thread::sleep(Duration::from_millis(delay));
-        while lock_found(paths) {
-            thread::sleep(Duration::from_millis(delay));
-        }
-    }
-
-    readiness(true);
-    func()
-}
-
-fn lock_found(paths: &[&Path]) -> bool {
-    for proc in procfs::all_processes() {
-        if let Ok(fdinfos) = proc.fd() {
-            for fdinfo in fdinfos {
-                if let procfs::FDTarget::Path(path) = fdinfo.target {
-                    if paths.into_iter().any(|&p| &*path == p) {
-                        return true;
-                    }
-                }
-            }
-        }
-    }
-
-    false
 }
